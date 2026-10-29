@@ -1,0 +1,35 @@
+# Zammad is used as is: the Compose stack and the scripts live in this repository
+# (roles/crust/files/) and are copied to the VM, so the VM never clones a repository.
+- name: Copy the Compose stack and the scripts
+  copy:
+    src: "{{ item.src }}"
+    dest: "/data/crust/{{ item.src }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - { src: docker-compose.yml, mode: '0644' }
+    - { src: docker-compose.override.yml, mode: '0644' }
+    - { src: backup_crontab.sh, mode: '0755' }
+
+# The values come from group_vars/all/app.yml and from the vault (group_vars/all/vault.yml).
+- name: Render the .env file
+  template:
+    src: env.j2
+    dest: /data/crust/.env
+    owner: root
+    group: root
+    mode: '0600'
+  no_log: true
+
+- name: "Run CRUST using docker-compose"
+  community.docker.docker_compose_v2:
+    project_src: /data/crust
+  register: output
+
+# Runs after the daily backup of the zammad-backup service (03:00 by default).
+- name: "Export the backups to the NAS with cron"
+  ansible.builtin.cron:
+    name: "export CRUST backups to the NAS"
+    minute: "0"
+    hour: "5"
+    job: "/data/crust/backup_crontab.sh >> /var/log/crust_backup.log 2>&1"
+  when: crust_nas_backup_enabled | default(false)

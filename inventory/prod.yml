@@ -1,0 +1,7 @@
+all:
+  hosts:
+    crust:
+      ansible_host: crust.epfl.ch
+      ansible_user: root
+      ansible_ssh_common_args: "-o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
+      ansible_python_interpreter: /usr/bin/python3

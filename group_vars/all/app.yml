@@ -1,0 +1,24 @@
+# Non-secret settings. Secrets live in group_vars/all/vault.yml (Ansible Vault),
+# see vault.yml.example at the root of the repository.
+
+# TODO: replace with the real DNS name once the VM and the name are granted
+crust_fqdn: "crust.epfl.ch"
+
+# Zammad version: pin it, and update it on purpose.
+crust_zammad_version: "7.2.2-0024"
+
+# true: temporary self-signed certificate generated on the VM (browser warning).
+# false: real certificate from the IT, taken from the vault (crust_tls_*).
+crust_tls_selfsigned: true
+
+crust_tz: "Europe/Zurich"
+
+# Attachment size accepted by nginx (Zammad has its own limit in the admin settings).
+crust_max_attachment_size: "20M"
+
+# Daily backup made by the zammad-backup service (kept in the zammad-backup volume).
+crust_backup_time: "03:00"
+crust_backup_hold_days: 10
+
+# Export the backups to the NAS share (needs crust_cifs_credentials in the vault).
+crust_nas_backup_enabled: true

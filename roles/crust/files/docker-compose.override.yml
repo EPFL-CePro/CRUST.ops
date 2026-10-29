@@ -1,0 +1,39 @@
+# Local changes on top of the upstream docker-compose.yml.
+# Compose loads this file automatically next to docker-compose.yml.
+
+# Rotate the container logs so that they cannot fill the disk.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  zammad-backup:
+    logging: *default-logging
+  zammad-elasticsearch:
+    logging: *default-logging
+  zammad-init:
+    logging: *default-logging
+  zammad-memcached:
+    logging: *default-logging
+  zammad-nginx:
+    logging: *default-logging
+    # IPv6 is disabled in the kernel of the VM (ipv6.disable=1) and the nginx of the image
+    # also listens on [::], which makes it fail with "Address family not supported".
+    # Remove that listen line from the template, then run the normal entrypoint.
+    entrypoint:
+      - /bin/sh
+      - -c
+      - sed -i '/listen \[::\]/d' /opt/zammad/contrib/nginx/zammad.conf && exec /opt/zammad/bin/docker-entrypoint "$$@"
+      - sh
+  zammad-postgresql:
+    logging: *default-logging
+  zammad-railsserver:
+    logging: *default-logging
+  zammad-redis:
+    logging: *default-logging
+  zammad-scheduler:
+    logging: *default-logging
+  zammad-websocket:
+    logging: *default-logging

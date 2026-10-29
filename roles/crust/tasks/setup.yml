@@ -1,0 +1,74 @@
+- name: Install Docker
+  apt:
+    name: docker.io
+    state: latest
+    update_cache: true
+
+- name: Install Docker Compose
+  apt:
+    name: docker-compose-v2
+    state: latest
+    update_cache: true
+
+- name: Install Git
+  apt:
+    name: git
+    state: latest
+    update_cache: true
+
+- name: Install Apache
+  apt:
+    name: apache2
+    state: latest
+    update_cache: true
+
+- name: Install cifs-utils
+  apt:
+    name: cifs-utils
+    state: latest
+    update_cache: true
+
+# Elasticsearch (used by Zammad) refuses to start with a lower value.
+- name: Set vm.max_map_count for Elasticsearch
+  ansible.posix.sysctl:
+    name: vm.max_map_count
+    value: "262144"
+    state: present
+    reload: true
+
+- name: Ensure /data/crust directory exists
+  file:
+    path: /data/crust
+    state: directory
+
+# Optional: mount the EPFL NAS share used for backups.
+# Set crust_nas_backup_enabled to true in group_vars/all/app.yml once the share exists.
+- name: Ensure /data/.cifs directory exists
+  file:
+    path: /data/.cifs/
+    state: directory
+  when: crust_nas_backup_enabled | default(false)
+
+- name: Write cifs credentials (from the vault)
+  copy:
+    content: "{{ crust_cifs_credentials }}"
+    dest: /data/.cifs/creds_crust_backup
+    mode: '0600'
+  when: crust_nas_backup_enabled | default(false)
+  no_log: true
+
+- name: Ensure /data/crust/NAS-backup mounting directory exists
+  file:
+    path: /data/crust/NAS-backup
+    state: directory
+  when: crust_nas_backup_enabled | default(false)
+
+# Also written to /etc/fstab so that it mounts again on restart.
+- name: Mount NAS-backup SMB share
+  ansible.posix.mount:
+    path: /data/crust/NAS-backup
+    src: //vpsi1files.epfl.ch/CEPRO/BACKUP/CRUST
+    fstype: cifs
+    opts: credentials=/data/.cifs/creds_crust_backup,iocharset=utf8,vers=3.0,_netdev
+    state: mounted
+  when: crust_nas_backup_enabled | default(false)
