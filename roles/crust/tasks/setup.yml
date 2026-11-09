@@ -1,74 +1,79 @@
-- name: Install Docker
-  apt:
-    name: docker.io
-    state: latest
+# Packages are installed if missing but never upgraded here: system updates are
+# handled outside of deployments, so a deploy never changes Docker underneath the app.
+- name: Install Docker, Docker Compose, Git and cifs-utils
+  ansible.builtin.apt:
+    name:
+      - docker.io
+      - docker-compose-v2
+      - git
+      - cifs-utils
+    state: present
     update_cache: true
-
-- name: Install Docker Compose
-  apt:
-    name: docker-compose-v2
-    state: latest
-    update_cache: true
-
-- name: Install Git
-  apt:
-    name: git
-    state: latest
-    update_cache: true
-
-- name: Install Apache
-  apt:
-    name: apache2
-    state: latest
-    update_cache: true
-
-- name: Install cifs-utils
-  apt:
-    name: cifs-utils
-    state: latest
-    update_cache: true
+    cache_valid_time: 3600
 
 # Elasticsearch (used by Zammad) refuses to start with a lower value.
-- name: Set vm.max_map_count for Elasticsearch
-  ansible.posix.sysctl:
-    name: vm.max_map_count
-    value: "262144"
-    state: present
-    reload: true
+# The file in /etc/sysctl.d keeps the value after a reboot; the handler applies it now.
+- name: Persist vm.max_map_count for Elasticsearch
+  ansible.builtin.copy:
+    content: "vm.max_map_count = 262144\n"
+    dest: /etc/sysctl.d/60-elasticsearch.conf
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Apply sysctl settings
+
+# Apply it before Docker starts Elasticsearch further down the play
+- name: Apply pending handlers
+  ansible.builtin.meta: flush_handlers
 
 - name: Ensure /data/crust directory exists
-  file:
+  ansible.builtin.file:
     path: /data/crust
     state: directory
+    mode: '0755'
 
 # Optional: mount the EPFL NAS share used for backups.
 # Set crust_nas_backup_enabled to true in group_vars/all/app.yml once the share exists.
-- name: Ensure /data/.cifs directory exists
-  file:
-    path: /data/.cifs/
-    state: directory
+- name: Mount the NAS share used for backups
   when: crust_nas_backup_enabled | default(false)
+  block:
+    - name: Ensure /data/.cifs directory exists
+      ansible.builtin.file:
+        path: /data/.cifs
+        state: directory
+        mode: '0700'
 
-- name: Write cifs credentials (from the vault)
-  copy:
-    content: "{{ crust_cifs_credentials }}"
-    dest: /data/.cifs/creds_crust_backup
-    mode: '0600'
-  when: crust_nas_backup_enabled | default(false)
-  no_log: true
+    - name: Write cifs credentials (from Keybase' secrets.yml)
+      ansible.builtin.copy:
+        content: "{{ crust_cifs_credentials }}"
+        dest: /data/.cifs/creds_crust_backup
+        mode: '0600'
+      no_log: true
 
-- name: Ensure /data/crust/NAS-backup mounting directory exists
-  file:
-    path: /data/crust/NAS-backup
-    state: directory
-  when: crust_nas_backup_enabled | default(false)
+    - name: Ensure /data/crust/NAS-backup mounting directory exists
+      ansible.builtin.file:
+        path: /data/crust/NAS-backup
+        state: directory
+        mode: '0755'
 
-# Also written to /etc/fstab so that it mounts again on restart.
-- name: Mount NAS-backup SMB share
-  ansible.posix.mount:
-    path: /data/crust/NAS-backup
-    src: //vpsi1files.epfl.ch/CEPRO/BACKUP/CRUST
-    fstype: cifs
-    opts: credentials=/data/.cifs/creds_crust_backup,iocharset=utf8,vers=3.0,_netdev
-    state: mounted
-  when: crust_nas_backup_enabled | default(false)
+    # Also mounts it again after a reboot. Replaces the line written by ansible.posix.mount, if any.
+    - name: Declare the NAS-backup SMB share in /etc/fstab
+      ansible.builtin.lineinfile:
+        path: /etc/fstab
+        regexp: '^\S+\s+/data/crust/NAS-backup\s'
+        line: >-
+          //vpsi1files.epfl.ch/CEPRO/BACKUP/CRUST /data/crust/NAS-backup cifs
+          credentials=/data/.cifs/creds_crust_backup,iocharset=utf8,vers=3.0,_netdev 0 0
+
+    - name: Check whether the NAS-backup share is mounted
+      ansible.builtin.command: mountpoint -q /data/crust/NAS-backup
+      register: crust_nas_mountpoint
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    # Plain mount command on purpose: the mount module needs the ansible.posix collection
+    - name: Mount the NAS-backup SMB share
+      ansible.builtin.command: mount /data/crust/NAS-backup  # noqa: command-instead-of-module
+      when: crust_nas_mountpoint.rc != 0
+      changed_when: true
