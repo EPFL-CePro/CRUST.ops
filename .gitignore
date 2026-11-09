@@ -11,3 +11,6 @@
 
 # Personal notes
 FILES.md
+
+# Act (local GitHub Actions related files)
+.secrets

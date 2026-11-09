@@ -8,8 +8,8 @@ on:
   workflow_dispatch:
     inputs:
       tags:
-        description: Ansible tags (e.g. cepro_crust.setup for a full provisioning)
-        default: cepro_crust.run,cepro_crust.apache
+        description: Ansible tags (e.g. crust.setup for a full provisioning)
+        default: crust.run,crust.apache
       check_mode:
         description: Dry run (--check), changes nothing on the VM
         type: boolean
@@ -20,7 +20,8 @@ jobs:
     uses: EPFL-CePro/CePro-Active/.github/workflows/ansible-deploy.yml@main
     with:
       keybase_dir: /keybase/team/cepro_crust
+      inventory: inventory/prod
       # On push, inputs.* are empty -> safe tags, real deploy
-      tags: ${{ inputs.tags || 'cepro_crust.run,cepro_crust.apache' }}
+      tags: ${{ inputs.tags || 'crust.run,crust.apache' }}
       check_mode: true # ${{ inputs.check_mode || false }}
     secrets: inherit
