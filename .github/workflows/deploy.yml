@@ -1,0 +1,26 @@
+name: Deploy CeProject
+
+on:
+  push:
+    branches: 
+      - main
+      - feature/add-ci-cd
+  workflow_dispatch:
+    inputs:
+      tags:
+        description: Ansible tags (e.g. ceproject.setup for a full provisioning)
+        default: ceproject.run,ceproject.apache
+      check_mode:
+        description: Dry run (--check), changes nothing on the VM
+        type: boolean
+        default: true
+
+jobs:
+  deploy:
+    uses: EPFL-CePro/CePro-Active/.github/workflows/ansible-deploy.yml@main
+    with:
+      keybase_dir: /keybase/team/ceproject
+      # On push, inputs.* are empty -> safe tags, real deploy
+      tags: ${{ inputs.tags || 'ceproject.run,ceproject.apache' }}
+      check_mode: true # ${{ inputs.check_mode || false }}
+    secrets: inherit
