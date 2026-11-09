@@ -1,0 +1,17 @@
+# Rendered by Ansible from roles/crust/templates/Caddyfile.j2: do not edit by hand on the VM.
+
+{{ crust_fqdn }} {
+{% if crust_tls_selfsigned | default(false) %}
+	# Temporary certificate from Caddy's own CA (browsers show a warning),
+	# until the IT delivers a real one. No Let's Encrypt: the VM is not reachable from the Internet.
+	tls internal
+{% else %}
+	# Certificate delivered by the IT (from secrets.yml): certificate + chain, and the key.
+	tls /certs/fullchain.pem /certs/key.pem
+{% endif %}
+
+	# Websockets and the X-Forwarded-* headers are handled by Caddy out of the box.
+	reverse_proxy zammad-nginx:{{ crust_nginx_port | default(8080) }}
+
+	log
+}

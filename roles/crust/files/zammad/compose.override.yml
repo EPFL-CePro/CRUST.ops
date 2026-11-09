@@ -1,5 +1,5 @@
-# Local changes on top of the upstream docker-compose.yml.
-# Compose loads this file automatically next to docker-compose.yml.
+# Local changes on top of the upstream zammad/compose.yml.
+# Merged with it by the include of the main compose.yml.
 
 # Rotate the container logs so that they cannot fill the disk.
 x-logging: &default-logging
