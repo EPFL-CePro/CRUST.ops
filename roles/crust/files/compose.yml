@@ -1,0 +1,14 @@
+# Main Compose file of CRUST: it only assembles the stacks below into one project.
+# Each included stack keeps its own folder (relative paths resolve from there),
+# and they all share the .env file next to this one.
+name: crust
+
+include:
+  # Zammad: upstream file, unmodified, plus our changes on top of it
+  - path:
+      - zammad/compose.yml
+      - zammad/compose.override.yml
+    env_file: .env
+  # Reverse proxy: TLS and HTTP -> HTTPS redirect, in front of zammad-nginx
+  - path: caddy/compose.yml
+    env_file: .env

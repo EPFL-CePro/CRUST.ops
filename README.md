@@ -4,33 +4,37 @@ Configuration-as-code for the deployment of CRUST (CePro Requests, Unified Suppo
 
 ## Prerequisites
 
-- the Ansible Vault password of the team;
-- root SSH access to the prod VM, with its address set as `ansible_host` in `inventory/prod.yml`.
+- access to the Keybase team `cepro_crust`, with Keybase running and its folder mounted at `/keybase`;
+- root SSH access to the prod VM, with its address set as `ansible_host` in `inventory/prod/hosts.yml`;
+- `ansible-core`, only modules from `ansible.builtin` are used (no Ansible Galaxy collection).
 
 ## How it works
 
-The deployment is a plain `ansible-playbook` run of `playbook.yml` against `inventory/prod.yml`. Install the `ansible` package first (it includes the collections used here); with `ansible-core` alone, also run `ansible-galaxy collection install -r requirements.yml`. The playbook:
+The deployment is a plain `ansible-playbook` run of `playbook.yml` against the `inventory/prod` inventory. The playbook:
 
-1. installs the dependencies on the VM (Docker, Docker Compose, Apache, ...);
-2. copies the Compose stack and the scripts (`roles/crust/files/`) to `/data/crust`;
-3. renders the `.env` file from `roles/crust/templates/env.j2`, with the settings of `group_vars/all/app.yml` and the secrets of the vault;
-4. starts the containers and installs the Apache reverse proxy.
+1. loads the secrets from `secrets.yml` in the Keybase team folder;
+2. installs the dependencies on the VM (Docker, Docker Compose, ...);
+3. copies the Compose stacks and the scripts (`roles/crust/files/`) to `/data/crust`;
+4. renders the `.env` file from `roles/crust/templates/env.j2`, with the settings of `group_vars/all/app.yml` and the secrets;
+5. renders the Caddyfile (reverse proxy and TLS), then starts the containers, Caddy included.
 
 ```bash
-ansible-playbook -i inventory/prod.yml playbook.yml -e env=prod --vault-id @prompt
+ansible-playbook playbook.yml -i inventory/prod
 ```
+
+Pushes to `main` are deployed by GitHub Actions, with the shared workflow of [CePro-Active](https://github.com/EPFL-CePro/CePro-Active) (see `.github/workflows/deploy.yml`). A manual run from the Actions tab is a dry run (`--check`) unless you untick `check_mode`.
 
 ## Tags
 
 - `crust.setup`: installs the dependencies on the VM.
-- `crust.run`: copies the stack and the scripts, renders the `.env`, then starts the containers. Use this one to push changes to production.
-- `crust.apache`: configures the Apache reverse proxy and sets up the TLS certificate (self-signed or from the vault, see `crust_tls_selfsigned`).
+- `crust.run`: copies the stacks and the scripts, renders the `.env` and the Caddyfile, installs the TLS certificate, then starts the containers. Use this one to push changes to production.
 
 ```bash
-ansible-playbook -i inventory/prod.yml playbook.yml -e env=prod --vault-id @prompt --tags crust.setup
-ansible-playbook -i inventory/prod.yml playbook.yml -e env=prod --vault-id @prompt --tags crust.run
-ansible-playbook -i inventory/prod.yml playbook.yml -e env=prod --vault-id @prompt --tags crust.apache
+ansible-playbook playbook.yml -i inventory/prod --tags crust.setup
+ansible-playbook playbook.yml -i inventory/prod --tags crust.run
 ```
+
+Add `--check` to see what would change without changing anything.
 
 ## Settings
 
@@ -38,42 +42,53 @@ In `group_vars/all/app.yml`:
 
 | Variable | Description |
 |---|---|
+| `secrets_dir` | Folder holding `secrets.yml` (default: `/keybase/team/cepro_crust`) |
 | `crust_fqdn` | DNS name of the service |
-| `crust_zammad_version` | Zammad image version (pinned) |
-| `crust_tls_selfsigned` | `true`: temporary self-signed certificate generated on the VM (browser warning). `false`: real certificate from the vault (`crust_tls_*`) |
+| `crust_tls_selfsigned` | `true`: temporary certificate from Caddy's own CA (browser warning). `false`: real certificate from the secrets (`crust_tls_*`) |
 | `crust_tz` | Time zone |
 | `crust_max_attachment_size` | Attachment size accepted by nginx |
 | `crust_backup_time`, `crust_backup_hold_days` | Time and retention of the daily backup |
 | `crust_nas_backup_enabled` | `true` to export the backups to the NAS share (default: `false`) |
 
+The image versions are pinned in the Compose files themselves (see [Updating Zammad](#updating-zammad)).
+
 ## Files
 
 In `roles/crust/files/`, copied to `/data/crust` on the VM:
 
-- `docker-compose.yml`: copy of the upstream [zammad-docker-compose](https://github.com/zammad/zammad-docker-compose) file, kept unmodified so that an update is a simple diff;
-- `docker-compose.override.yml`: our changes (log rotation, nginx IPv4 only);
+- `compose.yml`: the main Compose file. It holds no service itself and only includes the two stacks below into one project (`crust`), sharing the `.env` file;
+- `zammad/compose.yml`: the upstream [zammad-docker-compose](https://github.com/zammad/zammad-docker-compose) file, with fixed image versions, so that an update is a simple diff;
+- `zammad/compose.override.yml`: our changes to Zammad (log rotation, nginx IPv4 only);
+- `caddy/compose.yml`: the Caddy reverse proxy, with its `Caddyfile` and `certs/` next to it on the VM;
 - `backup_crontab.sh`: copies the backups of the `zammad-backup` service (daily, kept `crust_backup_hold_days` days in a Docker volume) to the NAS share.
+
+Every `docker compose` command is run from `/data/crust`, against the main file. The include needs Docker Compose 2.24 or newer.
+
+## Reverse proxy
+
+Caddy runs as a container of the stack (`caddy/compose.yml`) and is the only entry point: it listens on ports 80 and 443, redirects HTTP to HTTPS and forwards everything, websockets included, to the `zammad-nginx` container. Its configuration is rendered from `roles/crust/templates/Caddyfile.j2` to `/data/crust/caddy/Caddyfile`; Ansible reloads Caddy when it or the certificate changes.
+
+There is no Let's Encrypt certificate: the VM is not reachable from the Internet. The certificate is either Caddy's own (`crust_tls_selfsigned: true`) or the one delivered by the IT (`/data/crust/caddy/certs/`).
 
 ## Updating Zammad
 
-1. Compare `roles/crust/files/docker-compose.yml` with the upstream file and read the release notes;
-2. set the new version in `crust_zammad_version` (`group_vars/all/app.yml`);
-3. run `ansible-playbook -i inventory/prod.yml playbook.yml -e env=prod --vault-id @prompt --tags crust.run`.
+1. Compare `roles/crust/files/zammad/compose.yml` with the upstream file and read the release notes;
+2. update the image tags in that file: Zammad, plus Elasticsearch, PostgreSQL, Redis and memcached if upstream changed them;
+3. run `ansible-playbook playbook.yml -i inventory/prod --tags crust.run`, or push to `main`.
 
-Take a VM snapshot first.
+Take a VM snapshot first. Caddy is updated the same way, through its image tag in `roles/crust/files/caddy/compose.yml`.
 
 ## Secrets
 
-Secrets are stored encrypted with Ansible Vault in `group_vars/all/vault.yml`. The variables it must define are listed in `vault.yml.example` (database password, TLS key and certificates, backup share credentials).
+Secrets are stored in `/keybase/team/cepro_crust/secrets.yml`, a plain YAML file that Keybase keeps encrypted and only shares with the team. The variables it must define are listed in `secrets.yml.example`. Edit it directly in the Keybase folder:
 
 ```bash
-ansible-vault create group_vars/all/vault.yml
-ansible-vault edit group_vars/all/vault.yml
+$EDITOR /keybase/team/cepro_crust/secrets.yml
 ```
 
-With `crust_tls_selfsigned: true`, the vault only needs `crust_postgres_password`. To switch to the real certificate, add the `crust_tls_*` keys, set the variable to `false`, delete `/etc/ssl/certs/crust/crust-serveur.key` on the VM (the old self-signed key) and run `crust.apache`.
+With `crust_tls_selfsigned: true`, it only needs `crust_postgres_password`. To switch to the real certificate, add the `crust_tls_*` keys, set the variable to `false` and run `crust.run`.
 
-Never commit `vault.yml` unencrypted. The vault password is kept in the Keybase team `cepro_crust`.
+Never copy `secrets.yml` into this repository.
 
 ## Access
 

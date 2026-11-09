@@ -1,0 +1,10 @@
+- name: Apply sysctl settings
+  ansible.builtin.command: sysctl -p /etc/sysctl.d/60-elasticsearch.conf
+  changed_when: true
+
+# Caddy does not watch its files: reload it when the Caddyfile or the certificate change
+- name: Reload Caddy
+  ansible.builtin.command:
+    cmd: docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile
+    chdir: /data/crust
+  changed_when: true

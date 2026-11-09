@@ -1,18 +1,22 @@
-- include_tasks:
+# The secrets are a plain YAML file in the Keybase team folder, which Keybase keeps encrypted.
+# It is read on the machine running Ansible: from your Keybase mount when deploying by hand,
+# from the copy made by the CI otherwise (which passes its own secrets_dir).
+- name: Load the secrets from Keybase
+  ansible.builtin.include_vars:
+    file: "{{ secrets_dir }}/secrets.yml"
+  no_log: true
+  tags: always
+
+- name: Install the dependencies
+  ansible.builtin.include_tasks:
     file: setup.yml
     apply:
-      tags:
-        - crust.setup
+      tags: [crust.setup]
   tags: always
-- include_tasks:
+
+- name: Deploy the Compose stack
+  ansible.builtin.include_tasks:
     file: run.yml
     apply:
-      tags:
-        - crust.run
-  tags: always
-- include_tasks:
-    file: apache.yml
-    apply:
-      tags:
-        - crust.apache
+      tags: [crust.run]
   tags: always

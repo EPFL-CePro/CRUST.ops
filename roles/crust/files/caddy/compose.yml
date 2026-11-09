@@ -1,0 +1,28 @@
+# Reverse proxy in front of Zammad: TLS termination and HTTP -> HTTPS redirect.
+# Its configuration is the Caddyfile next to this file (rendered by Ansible).
+services:
+  caddy:
+    image: caddy:2.11.9-alpine
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./certs:/certs:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - zammad-nginx
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  # Caddy's own CA (tls internal) and state: keep them, or the certificate changes on each recreate
+  caddy-data:
+    driver: local
+  caddy-config:
+    driver: local

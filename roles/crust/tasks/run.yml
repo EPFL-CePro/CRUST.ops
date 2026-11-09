@@ -1,18 +1,29 @@
-# Zammad is used as is: the Compose stack and the scripts live in this repository
-# (roles/crust/files/) and are copied to the VM, so the VM never clones a repository.
-- name: Copy the Compose stack and the scripts
-  copy:
+# The VM never clones a repository: the Compose stacks and the scripts live in this
+# repository (roles/crust/files/) and are copied to the VM.
+- name: "Ensure the stack folders exist"
+  ansible.builtin.file:
+    path: "/data/crust/{{ item }}"
+    state: directory
+    mode: '0755'
+  loop:
+    - zammad
+    - caddy
+
+- name: "Copy the Compose stacks and the scripts"
+  ansible.builtin.copy:
     src: "{{ item.src }}"
     dest: "/data/crust/{{ item.src }}"
     mode: "{{ item.mode }}"
   loop:
-    - { src: docker-compose.yml, mode: '0644' }
-    - { src: docker-compose.override.yml, mode: '0644' }
+    - { src: compose.yml, mode: '0644' }
+    - { src: zammad/compose.yml, mode: '0644' }
+    - { src: zammad/compose.override.yml, mode: '0644' }
+    - { src: caddy/compose.yml, mode: '0644' }
     - { src: backup_crontab.sh, mode: '0755' }
 
-# The values come from group_vars/all/app.yml and from the vault (group_vars/all/vault.yml).
-- name: Render the .env file
-  template:
+# The values come from group_vars/all/app.yml and from secrets.yml in Keybase.
+- name: "Render the .env file"
+  ansible.builtin.template:
     src: env.j2
     dest: /data/crust/.env
     owner: root
@@ -20,10 +31,54 @@
     mode: '0600'
   no_log: true
 
-- name: "Run CRUST using docker-compose"
-  community.docker.docker_compose_v2:
-    project_src: /data/crust
-  register: output
+- name: "Render the Caddyfile"
+  ansible.builtin.template:
+    src: Caddyfile.j2
+    dest: /data/crust/caddy/Caddyfile
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Reload Caddy
+
+- name: "Ensure the certificates folder exists"
+  ansible.builtin.file:
+    path: /data/crust/caddy/certs
+    state: directory
+    mode: '0700'
+
+# Real certificate only: with crust_tls_selfsigned, Caddy makes its own (tls internal).
+- name: "Install the TLS certificate and key"
+  ansible.builtin.copy:
+    content: "{{ item.content }}"
+    dest: "/data/crust/caddy/certs/{{ item.dest }}"
+    owner: root
+    group: root
+    mode: '0600'
+  loop:
+    # Caddy expects the certificate followed by its chain, in one file
+    - { dest: fullchain.pem, content: "{{ crust_tls_cert }}{{ crust_tls_chain }}" }
+    - { dest: key.pem, content: "{{ crust_tls_key }}" }
+  when: not (crust_tls_selfsigned | default(false))
+  no_log: true
+  notify: Reload Caddy
+
+# "docker compose up --dry-run" cannot simulate the configs: section of compose.yml,
+# so check mode only validates the files and the .env interpolation.
+- name: "Validate the Compose stack"
+  ansible.builtin.command:
+    cmd: docker compose config --quiet
+    chdir: /data/crust
+  check_mode: false
+  changed_when: false
+  when: ansible_check_mode
+
+- name: "Run CRUST using docker compose"
+  ansible.builtin.command:
+    cmd: docker compose up -d --force-recreate --remove-orphans --pull always
+    chdir: /data/crust
+  register: crust_output
+  # compose prints "Running" for untouched containers, "Created"/"Recreated"/"Started" otherwise
+  changed_when: crust_output.stderr is search('Created|Started')
 
 # Runs after the daily backup of the zammad-backup service (03:00 by default).
 - name: "Export the backups to the NAS with cron"
@@ -32,4 +87,4 @@
     minute: "0"
     hour: "5"
     job: "/data/crust/backup_crontab.sh >> /var/log/crust_backup.log 2>&1"
-  when: crust_nas_backup_enabled | default(false)
+    state: "{{ 'present' if crust_nas_backup_enabled | default(false) else 'absent' }}"
