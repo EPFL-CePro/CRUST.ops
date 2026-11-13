@@ -1,5 +1,8 @@
 # CRUST.ops
 
+> [!IMPORTANT]
+> This has been moved to [gitlab.epfl.ch](https://gitlab.epfl.ch/cepro-it/crust.ops).
+
 Configuration-as-code for the deployment of CRUST (CePro Requests, Unified Support Tickets), the team's ticketing tool for the shared mailbox cepro-exams@epfl.ch. CRUST is a Zammad instance running with Docker Compose on a dedicated VM. Zammad is used as is, so this is the only repository needed: it holds the Docker Compose stack, the scripts and the Ansible deployment.
 
 ## Prerequisites
